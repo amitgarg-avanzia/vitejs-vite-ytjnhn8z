@@ -2,8 +2,8 @@ import { useState, useEffect, useMemo } from 'react';
 import type { ChangeEvent, FormEvent } from 'react';
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, collection, addDoc, onSnapshot, doc, updateDoc } from 'firebase/firestore';
-import { User, Phone, Activity, CalendarDays, PlusCircle, ClipboardList, Clock, CheckCircle2, Edit2, Filter, AlertTriangle } from 'lucide-react';
+import { getFirestore, collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { User, Phone, Activity, CalendarDays, PlusCircle, ClipboardList, Clock, CheckCircle2, Edit2, Filter, AlertTriangle, Trash2 } from 'lucide-react';
 
 // --- YOUR FIREBASE CONFIGURATION ---
 const firebaseConfig = {
@@ -69,6 +69,9 @@ export default function App() {
 
   // Edit State
   const [editPatientId, setEditPatientId] = useState<string | null>(null);
+  
+  // Delete State
+  const [deletePatientId, setDeletePatientId] = useState<string | null>(null);
 
   // Report State
   const [reportFilterType, setReportFilterType] = useState<string>('followUp'); // 'followUp' | 'entry' | 'range'
@@ -131,7 +134,7 @@ export default function App() {
     return () => unsubscribe();
   }, [user]);
 
-  // --- 3. FORM HANDLING ---
+  // --- 3. FORM & RECORD HANDLING ---
   const handleInputChange = (e: ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
     // keyof PatientFormData ensures Vercel knows this maps perfectly to our object
@@ -205,6 +208,20 @@ export default function App() {
   const cancelEdit = () => {
     setEditPatientId(null);
     setFormData({ name: '', gender: 'Male', mobile: '', ailment: '', followUpDate: '' });
+  };
+
+  const handleDeleteConfirm = async (id: string) => {
+    if (!user) return;
+    try {
+      const patientRef = doc(db, 'users', user.uid, 'patients', id);
+      await deleteDoc(patientRef);
+      showToast("Patient record deleted successfully!");
+      setDeletePatientId(null);
+    } catch (err: unknown) {
+      const error = err as Error;
+      console.error("Error deleting patient:", error);
+      showToast(`Failed: ${error.message || 'Unknown error'}`);
+    }
   };
 
   // --- 4. FILTERED REPORTS (In-Memory Filtering) ---
@@ -441,12 +458,18 @@ export default function App() {
                             </span>
                           </h3>
                         </div>
-                        <div className="flex gap-2">
+                        <div className="flex flex-wrap gap-2">
                           <button 
                             onClick={() => handleEditClick(patient)}
                             className="inline-flex items-center gap-1 bg-amber-50 text-amber-700 border border-amber-200 px-3 py-1.5 rounded-lg text-sm font-bold hover:bg-amber-100 transition-colors"
                           >
                             <Edit2 size={14} /> Edit
+                          </button>
+                          <button 
+                            onClick={() => setDeletePatientId(patient.id)}
+                            className="inline-flex items-center gap-1 bg-red-50 text-red-700 border border-red-200 px-3 py-1.5 rounded-lg text-sm font-bold hover:bg-red-100 transition-colors"
+                          >
+                            <Trash2 size={14} /> Delete
                           </button>
                           <a 
                             href={`tel:${patient.mobile}`} 
@@ -469,6 +492,30 @@ export default function App() {
                     </div>
                   ))
                 )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* DELETE CONFIRMATION MODAL */}
+        {deletePatientId && (
+          <div className="fixed inset-0 bg-slate-900/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-xl">
+              <h3 className="text-lg font-bold text-slate-900 mb-2">Delete Record?</h3>
+              <p className="text-slate-600 mb-6 text-sm leading-relaxed">This action cannot be undone. Are you sure you want to permanently delete this patient record?</p>
+              <div className="flex gap-3 justify-end">
+                <button
+                  onClick={() => setDeletePatientId(null)}
+                  className="px-4 py-2 rounded-lg text-sm font-bold bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => handleDeleteConfirm(deletePatientId)}
+                  className="px-4 py-2 rounded-lg text-sm font-bold bg-red-600 text-white hover:bg-red-700 transition-colors"
+                >
+                  Delete
+                </button>
               </div>
             </div>
           </div>
