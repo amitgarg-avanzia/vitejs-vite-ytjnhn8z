@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { initializeApp } from 'firebase/app';
+import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, collection, addDoc, onSnapshot, doc, updateDoc } from 'firebase/firestore';
 import { User, Phone, Activity, CalendarDays, PlusCircle, ClipboardList, Clock, CheckCircle2, Edit2, Filter, AlertTriangle } from 'lucide-react';
@@ -15,22 +15,38 @@ const firebaseConfig = {
   measurementId: "G-HXSKX24LZL"
 };
 
-// Initialize Firebase with your actual project details
-const app = initializeApp(firebaseConfig);
+// --- HOT RELOAD FIX ---
+// This prevents the blank screen crash in StackBlitz by ensuring Firebase only initializes once
+const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 const auth = getAuth(app);
 const db = getFirestore(app);
 
+// --- STRICT TYPESCRIPT INTERFACES ---
+interface PatientFormData {
+  name: string;
+  gender: string;
+  mobile: string;
+  ailment: string;
+  followUpDate: string;
+}
+
+interface PatientData extends PatientFormData {
+  id: string;
+  entryDate: string;
+  timestamp: number;
+}
+
 export default function App() {
-  const [user, setUser] = useState(null);
-  const [authError, setAuthError] = useState(null);
-  const [patients, setPatients] = useState([]);
-  const [activeTab, setActiveTab] = useState('new'); // 'new' | 'report'
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [toastMessage, setToastMessage] = useState('');
+  const [user, setUser] = useState<any>(null);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [patients, setPatients] = useState<PatientData[]>([]);
+  const [activeTab, setActiveTab] = useState<string>('new'); // 'new' | 'report'
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [toastMessage, setToastMessage] = useState<string>('');
 
   // Form State
   const todayString = new Date().toISOString().split('T')[0];
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<PatientFormData>({
     name: '',
     gender: 'Male',
     mobile: '',
@@ -39,26 +55,26 @@ export default function App() {
   });
 
   // Edit State
-  const [editPatientId, setEditPatientId] = useState(null);
+  const [editPatientId, setEditPatientId] = useState<string | null>(null);
 
   // Report State
-  const [reportFilterType, setReportFilterType] = useState('followUp'); // 'followUp' | 'entry' | 'range'
-  const [reportStartDate, setReportStartDate] = useState(todayString);
-  const [reportEndDate, setReportEndDate] = useState(todayString);
+  const [reportFilterType, setReportFilterType] = useState<string>('followUp'); // 'followUp' | 'entry' | 'range'
+  const [reportStartDate, setReportStartDate] = useState<string>(todayString);
+  const [reportEndDate, setReportEndDate] = useState<string>(todayString);
 
   // --- 1. AUTHENTICATION ---
   useEffect(() => {
     // Authenticate the user anonymously to secure their database records
-    signInAnonymously(auth).catch((error) => {
-      console.error("Auth error:", error);
-      if (error.code === 'auth/configuration-not-found' || error.message.includes('configuration-not-found')) {
+    signInAnonymously(auth).catch((err: any) => {
+      console.error("Auth error:", err);
+      if (err.code === 'auth/configuration-not-found' || err.message?.includes('configuration-not-found')) {
         setAuthError("ACTION REQUIRED: You need to enable 'Anonymous' sign-in in your Firebase Console. Go to Build > Authentication > Sign-in method, click 'Anonymous', and enable it.");
       } else {
-        setAuthError(`Authentication failed: ${error.message}`);
+        setAuthError(`Authentication failed: ${err.message}`);
       }
     });
 
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser: any) => {
       setUser(currentUser);
       if (currentUser) setAuthError(null); // Clear error if successfully logged in
     });
@@ -73,32 +89,44 @@ export default function App() {
     const patientsRef = collection(db, 'users', user.uid, 'patients');
     
     // Listen for real-time updates from your Firebase Firestore
-    const unsubscribe = onSnapshot(patientsRef, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    const unsubscribe = onSnapshot(patientsRef, (snapshot: any) => {
+      const data: PatientData[] = snapshot.docs.map((docSnap: any) => {
+        const docData = docSnap.data();
+        return {
+          id: docSnap.id,
+          name: docData.name || '',
+          gender: docData.gender || 'Male',
+          mobile: docData.mobile || '',
+          ailment: docData.ailment || '',
+          followUpDate: docData.followUpDate || '',
+          entryDate: docData.entryDate || '',
+          timestamp: docData.timestamp || 0
+        };
+      });
       // Sort by latest entry descending
-      data.sort((a, b) => b.timestamp - a.timestamp);
+      data.sort((a: PatientData, b: PatientData) => b.timestamp - a.timestamp);
       setPatients(data);
-    }, (error) => {
-      console.error("Firestore error:", error);
-      setAuthError(`Database Error: ${error.message} (Did you create the Firestore Database and set Rules to Test Mode?)`);
+    }, (err: any) => {
+      console.error("Firestore error:", err);
+      setAuthError(`Database Error: ${err.message} (Did you create the Firestore Database and set Rules to Test Mode?)`);
     });
 
     return () => unsubscribe();
   }, [user]);
 
   // --- 3. FORM HANDLING ---
-  const handleInputChange = (e) => {
+  const handleInputChange = (e: any) => {
     const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
+    setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
-  const showToast = (msg) => {
+  const showToast = (msg: string) => {
     setToastMessage(msg);
     // Keep error messages on screen a bit longer so they can be read
     setTimeout(() => setToastMessage(''), msg.includes('Failed') ? 6000 : 3000);
   };
 
-  const handleSubmit = async (e) => {
+  const handleSubmit = async (e: any) => {
     e.preventDefault();
     if (!user) {
       showToast("Authentication required to save data. Please check the error banner above.");
@@ -134,16 +162,16 @@ export default function App() {
         showToast("Patient record saved successfully!");
       }
       setFormData({ name: '', gender: 'Male', mobile: '', ailment: '', followUpDate: '' });
-    } catch (error) {
-      console.error("Error saving patient:", error);
+    } catch (err: any) {
+      console.error("Error saving patient:", err);
       // Display the EXACT error message from Firebase
-      showToast(`Failed: ${error.message}`);
+      showToast(`Failed: ${err.message}`);
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const handleEditClick = (patient) => {
+  const handleEditClick = (patient: PatientData) => {
     setFormData({
       name: patient.name,
       gender: patient.gender,
@@ -163,7 +191,7 @@ export default function App() {
 
   // --- 4. FILTERED REPORTS (In-Memory Filtering) ---
   const filteredPatients = useMemo(() => {
-    return patients.filter(p => {
+    return patients.filter((p: PatientData) => {
       if (reportFilterType === 'followUp') {
         return p.followUpDate === reportStartDate;
       } else if (reportFilterType === 'entry') {
@@ -291,7 +319,7 @@ export default function App() {
                 <textarea 
                   required name="ailment" 
                   value={formData.ailment} onChange={handleInputChange} 
-                  rows="3" placeholder="Describe the symptoms and diagnosis..." 
+                  rows={3} placeholder="Describe the symptoms and diagnosis..." 
                   className="w-full p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none transition"
                 ></textarea>
               </div>
@@ -382,7 +410,7 @@ export default function App() {
                     <p className="text-slate-500 font-medium">No records found for the selected criteria.</p>
                   </div>
                 ) : (
-                  filteredPatients.map((patient) => (
+                  filteredPatients.map((patient: PatientData) => (
                     <div key={patient.id} className="p-5 rounded-xl border border-slate-200 bg-white hover:shadow-md transition-shadow relative overflow-hidden group">
                       <div className="absolute top-0 left-0 w-1 h-full bg-blue-500"></div>
                       
