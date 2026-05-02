@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, ChangeEvent, FormEvent } from 'react';
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, collection, addDoc, onSnapshot, doc, updateDoc } from 'firebase/firestore';
@@ -22,6 +22,7 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 
 // --- STRICT TYPESCRIPT INTERFACES ---
+// These custom interfaces satisfy Vercel's strict compiler without crashing Vite
 interface PatientFormData {
   name: string;
   gender: string;
@@ -36,8 +37,19 @@ interface PatientData extends PatientFormData {
   timestamp: number;
 }
 
+interface LocalUser {
+  uid: string;
+}
+
+interface LocalQuerySnapshot {
+  docs: Array<{
+    id: string;
+    data: () => Record<string, unknown>;
+  }>;
+}
+
 export default function App() {
-  const [user, setUser] = useState<any>(null);
+  const [user, setUser] = useState<LocalUser | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
   const [patients, setPatients] = useState<PatientData[]>([]);
   const [activeTab, setActiveTab] = useState<string>('new'); // 'new' | 'report'
@@ -65,18 +77,20 @@ export default function App() {
   // --- 1. AUTHENTICATION ---
   useEffect(() => {
     // Authenticate the user anonymously to secure their database records
-    signInAnonymously(auth).catch((err: any) => {
-      console.error("Auth error:", err);
-      if (err.code === 'auth/configuration-not-found' || err.message?.includes('configuration-not-found')) {
+    signInAnonymously(auth).catch((err: unknown) => {
+      const error = err as { code?: string; message?: string };
+      console.error("Auth error:", error);
+      if (error.code === 'auth/configuration-not-found' || error.message?.includes('configuration-not-found')) {
         setAuthError("ACTION REQUIRED: You need to enable 'Anonymous' sign-in in your Firebase Console. Go to Build > Authentication > Sign-in method, click 'Anonymous', and enable it.");
       } else {
-        setAuthError(`Authentication failed: ${err.message}`);
+        setAuthError(`Authentication failed: ${error.message || 'Unknown error'}`);
       }
     });
 
-    const unsubscribe = onAuthStateChanged(auth, (currentUser: any) => {
-      setUser(currentUser);
-      if (currentUser) setAuthError(null); // Clear error if successfully logged in
+    const unsubscribe = onAuthStateChanged(auth, (currentUser: unknown) => {
+      const authUser = currentUser as LocalUser | null;
+      setUser(authUser);
+      if (authUser) setAuthError(null); // Clear error if successfully logged in
     });
     return () => unsubscribe();
   }, []);
@@ -89,35 +103,38 @@ export default function App() {
     const patientsRef = collection(db, 'users', user.uid, 'patients');
     
     // Listen for real-time updates from your Firebase Firestore
-    const unsubscribe = onSnapshot(patientsRef, (snapshot: any) => {
-      const data: PatientData[] = snapshot.docs.map((docSnap: any) => {
+    const unsubscribe = onSnapshot(patientsRef, (snapshot: unknown) => {
+      const snap = snapshot as LocalQuerySnapshot;
+      const data: PatientData[] = snap.docs.map((docSnap) => {
         const docData = docSnap.data();
         return {
           id: docSnap.id,
-          name: docData.name || '',
-          gender: docData.gender || 'Male',
-          mobile: docData.mobile || '',
-          ailment: docData.ailment || '',
-          followUpDate: docData.followUpDate || '',
-          entryDate: docData.entryDate || '',
-          timestamp: docData.timestamp || 0
+          name: String(docData.name || ''),
+          gender: String(docData.gender || 'Male'),
+          mobile: String(docData.mobile || ''),
+          ailment: String(docData.ailment || ''),
+          followUpDate: String(docData.followUpDate || ''),
+          entryDate: String(docData.entryDate || ''),
+          timestamp: Number(docData.timestamp || 0)
         };
       });
       // Sort by latest entry descending
       data.sort((a: PatientData, b: PatientData) => b.timestamp - a.timestamp);
       setPatients(data);
-    }, (err: any) => {
-      console.error("Firestore error:", err);
-      setAuthError(`Database Error: ${err.message} (Did you create the Firestore Database and set Rules to Test Mode?)`);
+    }, (err: unknown) => {
+      const error = err as Error;
+      console.error("Firestore error:", error);
+      setAuthError(`Database Error: ${error.message} (Did you create the Firestore Database and set Rules to Test Mode?)`);
     });
 
     return () => unsubscribe();
   }, [user]);
 
   // --- 3. FORM HANDLING ---
-  const handleInputChange = (e: any) => {
+  const handleInputChange = (e: ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
+    // keyof PatientFormData ensures Vercel knows this maps perfectly to our object
+    setFormData((prev) => ({ ...prev, [name as keyof PatientFormData]: value }));
   };
 
   const showToast = (msg: string) => {
@@ -126,7 +143,7 @@ export default function App() {
     setTimeout(() => setToastMessage(''), msg.includes('Failed') ? 6000 : 3000);
   };
 
-  const handleSubmit = async (e: any) => {
+  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!user) {
       showToast("Authentication required to save data. Please check the error banner above.");
@@ -162,10 +179,10 @@ export default function App() {
         showToast("Patient record saved successfully!");
       }
       setFormData({ name: '', gender: 'Male', mobile: '', ailment: '', followUpDate: '' });
-    } catch (err: any) {
-      console.error("Error saving patient:", err);
-      // Display the EXACT error message from Firebase
-      showToast(`Failed: ${err.message}`);
+    } catch (err: unknown) {
+      const error = err as Error;
+      console.error("Error saving patient:", error);
+      showToast(`Failed: ${error.message || 'Unknown error'}`);
     } finally {
       setIsSubmitting(false);
     }
